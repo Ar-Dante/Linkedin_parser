@@ -6,10 +6,19 @@ load_dotenv()
 LINKEDIN_EMAIL = os.getenv('LINKEDIN_EMAIL')
 LINKEDIN_PASSWORD = os.getenv('LINKEDIN_PASSWORD')
 
+SESSION_FOLDER = os.getenv('SESSION_FOLDER', './sessions')
+COOKIES_FILE = os.getenv('COOKIES_FILE', 'linkedin_cookies.json')
+USER_AGENT_FILE = os.getenv('USER_AGENT_FILE', 'user_agent.txt')
+REUSE_SESSION = os.getenv('REUSE_SESSION', 'true').lower() == 'true'
+
+os.makedirs(SESSION_FOLDER, exist_ok=True)
+
 PROXY_LIST = os.getenv('PROXY_LIST', '').split(',') if os.getenv('PROXY_LIST') else []
 
 DEFAULT_MESSAGE = os.getenv('DEFAULT_MESSAGE', 'Hello! I would like to connect.')
-CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL', 15))
+CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL', 300))
+VOICE_MESSAGE_PATH = os.getenv('VOICE_MESSAGE_PATH', '')
+DOWNLOAD_PATH = os.getenv('DOWNLOAD_PATH', './downloads')
 
 DELAY_RANGE = (2, 5)
 TYPING_DELAY = (0.1, 0.3)
@@ -17,6 +26,9 @@ SCROLL_PAUSE = (1, 3)
 
 LINKEDIN_URL = 'https://www.linkedin.com'
 LOGIN_URL = f'{LINKEDIN_URL}/login'
+
+if DOWNLOAD_PATH:
+    os.makedirs(DOWNLOAD_PATH, exist_ok=True)
 
 SELECTORS = {
     'email_input': 'input[id="username"]',

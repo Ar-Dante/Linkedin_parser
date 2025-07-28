@@ -31,6 +31,10 @@ def main():
                 profile_url,
                 "Hi! I came across your profile and would love to connect."
             )
+
+            # Send voice message
+            # success = automation.send_voice_message(profile_url)
+
             if success:
                 logger.info(f"Message sent to {profile_url}")
             else:
