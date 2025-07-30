@@ -2,12 +2,13 @@ from abc import ABC, abstractmethod
 import json
 import logging
 import os
-from typing import Optional, Any, Union
+from typing import Any
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from pydantic import BaseModel
+import aiofiles
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ class BaseAutomation(ABC):
     """Abstract base class for web automation"""
 
     def __init__(self):
-        self.driver: Optional[WebDriver] = None
+        self.driver: WebDriver | None = None
         self.logged_in: bool = False
 
     @abstractmethod
@@ -45,7 +46,7 @@ class BaseAutomation(ABC):
         pass
 
     @abstractmethod
-    async def check_response(self, recipient_url: str) -> Optional[bool]:
+    async def check_response(self, recipient_url: str) -> bool | None:
         """Check for responses"""
         pass
 
@@ -57,10 +58,12 @@ class BaseAutomation(ABC):
     async def save_entities(self, entities: list[BaseModel], filepath: str) -> bool:
         """Generic method to save any pydantic model entities to JSON file"""
         try:
-            existing_data = []
+            existing_data: list[dict[str, Any]] = []
+
             if os.path.exists(filepath):
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    existing_data = json.load(f)
+                async with aiofiles.open(filepath, 'r', encoding='utf-8') as f:
+                    content = await f.read()
+                    existing_data = json.loads(content)
 
             new_data = [entity.dict(exclude_none=True) for entity in entities]
 
@@ -78,8 +81,8 @@ class BaseAutomation(ABC):
             else:
                 all_data = new_data
 
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(all_data, f, indent=2, ensure_ascii=False)
+            async with aiofiles.open(filepath, 'w', encoding='utf-8') as f:
+                await f.write(json.dumps(all_data, indent=2, ensure_ascii=False))
 
             logger.info(f"Saved {len(new_data)} items to {filepath}")
             return True
@@ -88,7 +91,7 @@ class BaseAutomation(ABC):
             logger.error(f"Error saving data to {filepath}: {e}")
             return False
 
-    def wait_for_element(self, selector: str, timeout: int = 10) -> Optional[Any]:
+    def wait_for_element(self, selector: str, timeout: int = 10) -> Any | None:
         """Wait for element to be present"""
         try:
             element = WebDriverWait(self.driver, timeout).until(
@@ -99,7 +102,7 @@ class BaseAutomation(ABC):
             logger.debug(f"Element not found: {selector}")
             return None
 
-    def find_element_by_selectors(self, parent, selectors: Union[str, list[str]]) -> Optional[Any]:
+    def find_element_by_selectors(self, parent, selectors: str | list[str]) -> Any | None:
         """Try multiple selectors to find an element"""
         if isinstance(selectors, str):
             selectors = [selectors]
@@ -113,7 +116,7 @@ class BaseAutomation(ABC):
                 continue
         return None
 
-    async def extract_text(self, parent, selectors: Union[str, list[str]], default: str = "") -> str:
+    async def extract_text(self, parent, selectors: str | list[str], default: str = "") -> str:
         """Extract text from element using multiple selectors"""
         element = self.find_element_by_selectors(parent, selectors)
         return element.text.strip() if element else default

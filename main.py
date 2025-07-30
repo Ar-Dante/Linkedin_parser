@@ -3,7 +3,7 @@ import logging
 import sys
 from linkedin_automation import LinkedInAutomation
 from config import LINKEDIN_EMAIL, LINKEDIN_PASSWORD
-from search_engine import SearchEngine
+from search_engine import LinkedInSearchEngine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ async def main():
 
     try:
         await automation.setup_driver()
-        search_engine = SearchEngine(automation)
+        search_engine = LinkedInSearchEngine(automation)
         if not await automation.login():
             logger.error("Failed to login")
             return

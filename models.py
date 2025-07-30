@@ -1,5 +1,4 @@
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
 from datetime import datetime
 
 
@@ -7,7 +6,7 @@ class BaseData(BaseModel):
     """Base model for all data types"""
     searched_at: str = Field(default_factory=lambda: datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
     search_keywords: str = ""
-    search_location: Optional[str] = None
+    search_location: str | None = None
 
     class Config:
         extra = "allow"
@@ -29,7 +28,7 @@ class ProfileData(BaseData):
     about: str = ""
     current_company: str = ""
     connection_sent: bool = False
-    connection_sent_at: Optional[str] = None
+    connection_sent_at: str | None = None
     message_sent: bool = False
 
     def get_key_field(self) -> str:
@@ -81,4 +80,4 @@ class ConversationData(BaseModel):
     has_response: bool = False
     user_name: str
     voice_sent: bool = False
-    voice_responses: list[str] = Field(default_factory=list)
+    voice_responses: dict[str, str] | None = Field(default=None)
