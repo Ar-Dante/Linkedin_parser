@@ -194,33 +194,29 @@ class LinkedInParser:
             return None
 
     def save_to_json(self, data: Union[
-        ProfileData, CompanyData, JobData, list[ProfileData], list[CompanyData], list[JobData]]):
-
+        ProfileData, CompanyData, JobData,
+        list[ProfileData], list[CompanyData], list[JobData]
+    ]):
         os.makedirs(DATA_FOLDER, exist_ok=True)
 
-        if isinstance(data, list) and len(data) > 0:
-            data_type = type(data[0])
-            items = data
-        else:
-            data_type = type(data)
-            items = [data]
+        items = data if isinstance(data, list) else [data]
+        data_type = type(items[0]) if items else None
 
-        if data_type == ProfileData:
-            file_path = os.path.join(DATA_FOLDER, PROFILES_FILE)
-        elif data_type == CompanyData:
-            file_path = os.path.join(DATA_FOLDER, COMPANIES_FILE)
-        elif data_type == JobData:
-            file_path = os.path.join(DATA_FOLDER, JOBS_FILE)
-        else:
-            file_path = os.path.join(DATA_FOLDER, SEARCH_RESULTS_FILE)
+        file_map = {
+            ProfileData: PROFILES_FILE,
+            CompanyData: COMPANIES_FILE,
+            JobData: JOBS_FILE
+        }
+        file_name = file_map.get(data_type, SEARCH_RESULTS_FILE)
+        file_path = os.path.join(DATA_FOLDER, file_name)
 
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 existing_data = json.load(f)
-        except:
+        except (FileNotFoundError, json.JSONDecodeError):
             existing_data = []
 
-        existing_data.extend([item.__dict__ for item in items])
+        existing_data.extend(item.__dict__ for item in items)
 
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(existing_data, f, ensure_ascii=False, indent=2)
