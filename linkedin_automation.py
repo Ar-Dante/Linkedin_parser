@@ -1,39 +1,33 @@
+import asyncio
 import json
-from typing import Optional, List
+from typing import Optional
 from selenium.webdriver.common.keys import Keys
 import undetected_chromedriver as uc
+
+from base_automatation import BaseAutomation
+from models import ConversationData
 from config import *
 from utils import *
 
 logger = logging.getLogger(__name__)
 
 
-class LinkedInAutomation:
-    def __init__(self, use_proxy: bool = True):
-        self.driver = None
-        self.use_proxy = use_proxy
-        self.logged_in = False
-        self.conversations = {}
+class LinkedInAutomation(BaseAutomation):
+    """LinkedIn automation with async support"""
 
+    def __init__(self, use_proxy: bool = True):
+        super().__init__()
+        self.use_proxy = use_proxy
+        self.conversations: dict[str, ConversationData] = {}
         self.cookies_path = os.path.join(SESSION_FOLDER, COOKIES_FILE)
         self.user_agent_path = os.path.join(SESSION_FOLDER, USER_AGENT_FILE)
 
-    def setup_driver(self) -> None:
+    async def setup_driver(self) -> None:
         """Initialize Chrome driver with anti-detection features"""
         options = uc.ChromeOptions()
-
         options.add_argument('--disable-blink-features=AutomationControlled')
 
-        if os.path.exists(self.user_agent_path):
-            with open(self.user_agent_path, 'r') as f:
-                user_agent = f.read().strip()
-            logger.info("Using saved user-agent")
-        else:
-            user_agent = get_random_user_agent()
-            with open(self.user_agent_path, 'w') as f:
-                f.write(user_agent)
-            logger.info("Generated new user-agent")
-
+        user_agent = await self._get_or_create_user_agent()
         options.add_argument(f'user-agent={user_agent}')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--no-sandbox')
@@ -41,270 +35,214 @@ class LinkedInAutomation:
 
         if self.use_proxy and PROXY_LIST:
             proxy = random.choice(PROXY_LIST)
-            if check_proxy(proxy):
+            if await self._check_proxy(proxy):
                 options.add_argument(f'--proxy-server={proxy}')
                 logger.info(f"Using proxy: {proxy}")
-            else:
-                logger.warning(f"Proxy {proxy} is not working, continuing without proxy")
 
         self.driver = uc.Chrome(options=options)
         self.driver.maximize_window()
-
         self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-    def save_cookies(self) -> bool:
-        """Save browser cookies to file"""
+    async def login(self) -> bool:
+        """Login to LinkedIn with session management"""
         try:
-            cookies = self.driver.get_cookies()
-            print(cookies)
-            with open(self.cookies_path, 'w') as f:
-                json.dump(cookies, f, indent=2)
-            logger.info(f"Cookies saved to {self.cookies_path}")
-            return True
-        except Exception as e:
-            logger.error(f"Error saving cookies: {e}")
-            return False
-
-    def load_cookies(self) -> bool:
-        """Load cookies from file"""
-        try:
-            if not os.path.exists(self.cookies_path):
-                logger.info(f"No cookies file found at {self.cookies_path}")
-                return False
-
-            self.driver.get(LINKEDIN_URL)
-            human_delay(2, 3)
-
-            with open(self.cookies_path, 'r') as f:
-                cookies = json.load(f)
-
-            for cookie in cookies:
-                if 'expiry' in cookie:
-                    del cookie['expiry']
-                try:
-                    self.driver.add_cookie(cookie)
-                except Exception as e:
-                    logger.debug(f"Could not add cookie: {e}")
-
-            logger.info(f"Cookies loaded from {self.cookies_path}")
-
-            self.driver.refresh()
-            human_delay(3, 5)
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Error loading cookies: {e}")
-            return False
-
-    def is_logged_in(self) -> bool:
-        """Check if currently logged in"""
-        try:
-            current_url = self.driver.current_url
-            if any(path in current_url for path in ['feed', 'mynetwork', 'messaging', 'jobs', 'notifications']):
-                profile_elements = self.driver.find_elements(By.CSS_SELECTOR, SELECTORS['profile_photo'])
-                if profile_elements:
-                    return True
-            return False
-        except Exception:
-            return False
-
-    def login(self) -> bool:
-        """Login to LinkedIn account"""
-        try:
-            if REUSE_SESSION and self.load_cookies():
-                logger.info("Checking if session is still valid...")
-
+            if REUSE_SESSION and await self._load_cookies():
                 self.driver.get(f"{LINKEDIN_URL}/feed/")
-                human_delay(3, 5)
+                await asyncio.sleep(random.uniform(3, 5))
 
-                if self.is_logged_in():
+                if await self._is_logged_in():
                     self.logged_in = True
-                    logger.info(f"Successfully logged in using saved session")
+                    logger.info("Successfully logged in using saved session")
                     return True
-                else:
-                    logger.info("Saved session is no longer valid, proceeding with login...")
 
-            logger.info(f"Starting login process...")
-            self.driver.get(LOGIN_URL)
-            human_delay(*DELAY_RANGE)
-
-            email_input = wait_for_element(self.driver, SELECTORS['email_input'])
-            if not email_input:
-                raise Exception("Email input not found")
-
-            move_to_element_human(self.driver, email_input)
-            human_typing(email_input, LINKEDIN_EMAIL, TYPING_DELAY)
-            human_delay(1, 2)
-
-            password_input = wait_for_element(self.driver, SELECTORS['password_input'])
-            if not password_input:
-                raise Exception("Password input not found")
-
-            move_to_element_human(self.driver, password_input)
-            human_typing(password_input, LINKEDIN_PASSWORD, TYPING_DELAY)
-            human_delay(1, 2)
-
-            login_button = wait_for_element(self.driver, SELECTORS['login_button'])
-            if not login_button:
-                raise Exception("Login button not found")
-
-            move_to_element_human(self.driver, login_button)
-            safe_click(self.driver, login_button)
-
-            human_delay(5, 8)
-
-            if self._handle_verification():
-                human_delay(3, 5)
-
-            if "feed" in self.driver.current_url or "mynetwork" in self.driver.current_url:
-                self.logged_in = True
-                logger.info("Login successful!")
-                logger.info("Save cookie")
-                self.save_cookies()
-
-                random_scroll(self.driver, random.randint(1, 3))
-                return True
-            else:
-                logger.error("Login failed - unexpected URL")
-                return False
+            return await self._perform_login()
 
         except Exception as e:
             logger.error(f"Login error: {e}")
             return False
 
-    def _handle_verification(self) -> bool:
-        """Handle verification code if required"""
-        try:
-            if "checkpoint" not in self.driver.current_url and "challenge" not in self.driver.current_url:
-                return False
-
-            logger.info("Verification required!")
-
-            human_delay(2, 3)
-
-            verification_input = wait_for_element(self.driver, SELECTORS['verification_inputs'], timeout=5)
-
-            if not verification_input:
-                logger.error("Verification input not found")
-                return False
-
-            verification_code = self._get_verification_code()
-            if not verification_code:
-                return False
-
-            move_to_element_human(self.driver, verification_input)
-            human_typing(verification_input, verification_code, TYPING_DELAY)
-            human_delay(1, 2)
-
-            submit_button = wait_for_element(self.driver, SELECTORS['verification_submit'], timeout=5)
-
-            if submit_button:
-                move_to_element_human(self.driver, submit_button)
-                safe_click(self.driver, submit_button)
-                logger.info("Verification code submitted")
-                human_delay(3, 5)
-                return True
-            else:
-                verification_input.send_keys(Keys.RETURN)
-                logger.info("Verification code submitted via Enter key")
-                human_delay(3, 5)
-                return True
-
-        except Exception as e:
-            logger.error(f"Verification handling error: {e}")
+    async def send_connection_request(self, profile_url: str, message: str = CONNECTION_MESSAGE,
+                                      note_required: bool = True) -> bool:
+        """Send connection request with optional personalized message"""
+        if not self.logged_in:
+            logger.error("Not logged in!")
             return False
 
-    def _get_verification_code(self) -> Optional[str]:
-        """Get verification code from user or automated source"""
-        logger.info("Manual verification required!")
-        print("Please enter the verification code sent to your email/phone:")
-
         try:
-            code = input("Enter verification code: ").strip()
-            if code:
-                return code
-            else:
-                logger.error("No verification code provided")
-                return None
-        except KeyboardInterrupt:
-            logger.info("Verification cancelled by user")
-            return None
+            logger.info(f"Sending connection request to: {profile_url}")
 
-    def send_message(self, profile_url: str, message: str = DEFAULT_MESSAGE) -> bool:
+            if self.driver.current_url != profile_url:
+                self.driver.get(profile_url)
+                await asyncio.sleep(random.uniform(3, 5))
+
+            more_button = self.wait_for_element(SELECTORS['more_button'])
+            if not more_button:
+                logger.error("More button not found")
+                return False
+
+            await self._safe_click(more_button)
+            await asyncio.sleep(random.uniform(1, 2))
+
+            connect_button = self.wait_for_element(SELECTORS['connect_button_dropdown'])
+            if not connect_button:
+                logger.error("Connect button not found in dropdown menu")
+                return False
+
+            await self._safe_click(connect_button)
+            await asyncio.sleep(random.uniform(2, 3))
+
+            if note_required:
+                add_note_button = self.wait_for_element(SELECTORS['add_note_button'], timeout=5)
+                if add_note_button:
+                    await self._safe_click(add_note_button)
+                    await asyncio.sleep(random.uniform(1, 2))
+
+                    message_textarea = self.wait_for_element(SELECTORS['custom_message_textarea'], timeout=5)
+                    if message_textarea:
+                        await self._human_typing(message_textarea, message)
+                        await asyncio.sleep(random.uniform(1, 2))
+
+            send_button = self.wait_for_element(SELECTORS['send_invitation_button'], timeout=5)
+            if not send_button:
+                logger.error("Send invitation button not found")
+                return False
+
+            await self._safe_click(send_button)
+            logger.info("Connection request sent successfully!")
+
+            await self._update_profile_data(profile_url, {'connection_sent': True,
+                                                          'connection_sent_at': time.strftime('%Y-%m-%d %H:%M:%S')})
+            await asyncio.sleep(random.uniform(2, 4))
+            return True
+
+        except Exception as e:
+            logger.error(f"Error sending connection request: {e}")
+            return False
+
+    async def send_message(self, profile_url: str, message: str = DEFAULT_MESSAGE) -> bool:
         """Send message to a LinkedIn user"""
         if not self.logged_in:
             logger.error("Not logged in!")
             return False
 
         try:
-            logger.info(f"Navigating to profile: {profile_url}")
+            logger.info(f"Sending message to: {profile_url}")
+
             self.driver.get(profile_url)
-            human_delay(*DELAY_RANGE)
+            await asyncio.sleep(random.uniform(*DELAY_RANGE))
 
-            random_scroll(self.driver, random.randint(1, 2))
+            await self._random_scroll()
 
-            message_button = wait_for_element(self.driver, SELECTORS['message_button'], 15)
+            message_button = self.wait_for_element(SELECTORS['message_button'], timeout=15)
             if not message_button:
                 logger.error("Message button not found")
                 return False
 
-            move_to_element_human(self.driver, message_button)
-            human_delay(1, 2)
+            await self._safe_click(message_button)
+            await asyncio.sleep(random.uniform(3, 5))
 
-            if not safe_click(self.driver, message_button):
-                return False
-
-            human_delay(3, 5)
-
-            message_input = wait_for_element(self.driver, SELECTORS['message_input'], 15)
+            message_input = self.wait_for_element(SELECTORS['message_input'], timeout=15)
             if not message_input:
                 logger.error("Message input not found")
                 return False
 
-            move_to_element_human(self.driver, message_input)
-            safe_click(self.driver, message_input)
-            human_delay(1, 2)
+            await self._safe_click(message_input)
+            await asyncio.sleep(random.uniform(1, 2))
 
-            for char in message:
-                message_input.send_keys(char)
-                time.sleep(random.uniform(*TYPING_DELAY))
+            await self._human_typing(message_input, message)
+            await asyncio.sleep(random.uniform(2, 3))
 
-            human_delay(2, 3)
-
-            send_button = wait_for_element(self.driver, SELECTORS['send_button'])
+            send_button = self.wait_for_element(SELECTORS['send_button'])
             if not send_button:
                 logger.error("Send button not found")
                 return False
 
-            move_to_element_human(self.driver, send_button)
-            human_delay(1, 2)
+            await self._safe_click(send_button)
+            logger.info("Message sent successfully!")
 
-            if safe_click(self.driver, send_button):
-                logger.info("Message sent successfully!")
+            user_name = await self._extract_username(profile_url)
+            self.conversations[profile_url] = ConversationData(
+                message_sent=message,
+                timestamp=time.time(),
+                has_response=False,
+                user_name=user_name
+            )
 
-                try:
-                    name_element = self.driver.find_element(By.CSS_SELECTOR, SELECTORS['profile_name'])
-                    user_name = name_element.text.strip()
-                except:
-                    user_name = profile_url.split('/')[-2]
-                self.conversations[profile_url] = {
-                    'message_sent': message,
-                    'timestamp': time.time(),
-                    'has_response': False,
-                    'user_name': user_name
-                }
-
-                human_delay(2, 4)
-                return True
-
-            return False
+            await asyncio.sleep(random.uniform(2, 4))
+            return True
 
         except Exception as e:
             logger.error(f"Error sending message: {e}")
             return False
 
-    def check_response(self, profile_url: str) -> Optional[bool]:
+    async def send_voice_message(self, profile_url: str, voice_file_path: str = VOICE_MESSAGE_PATH) -> bool:
+        """Send voice message to a LinkedIn user"""
+        if not self.logged_in:
+            logger.error("Not logged in!")
+            return False
+
+        if not voice_file_path or not os.path.exists(voice_file_path):
+            logger.error(f"Voice file not found: {voice_file_path}")
+            return False
+
+        try:
+            logger.info(f"Sending voice message to: {profile_url}")
+
+            self.driver.get(profile_url)
+            await asyncio.sleep(random.uniform(*DELAY_RANGE))
+
+            await self._random_scroll()
+
+            message_button = self.wait_for_element(SELECTORS['message_button'], timeout=15)
+            if not message_button:
+                logger.error("Message button not found")
+                return False
+
+            await self._safe_click(message_button)
+            await asyncio.sleep(random.uniform(3, 5))
+
+            attachment_button = self.find_element_by_selectors(self.driver, SELECTORS['attachment_button'])
+            if not attachment_button:
+                logger.error("Attachment button not found")
+                return False
+
+            await self._safe_click(attachment_button)
+            await asyncio.sleep(random.uniform(2, 3))
+
+            file_inputs = self.driver.find_elements(By.CSS_SELECTOR, SELECTORS['file_input'])
+            if not file_inputs:
+                logger.error("File input not found")
+                return False
+
+            file_inputs[0].send_keys(os.path.abspath(voice_file_path))
+            logger.info(f"Uploaded voice file: {voice_file_path}")
+            await asyncio.sleep(random.uniform(3, 5))
+
+            send_button = self.wait_for_element(SELECTORS['send_button'], timeout=10)
+            if not send_button:
+                logger.error("Send button not found after file upload")
+                return False
+
+            await self._safe_click(send_button)
+            logger.info("Voice message sent successfully!")
+
+            user_name = await self._extract_username(profile_url)
+            self.conversations[profile_url] = ConversationData(
+                message_sent='[Voice Message]',
+                timestamp=time.time(),
+                has_response=False,
+                user_name=user_name,
+                voice_sent=True
+            )
+
+            await asyncio.sleep(random.uniform(2, 4))
+            return True
+
+        except Exception as e:
+            logger.error(f"Error sending voice message: {e}")
+            return False
+
+    async def check_response(self, profile_url: str) -> Optional[bool]:
         """Check if user has responded to the message"""
         if profile_url not in self.conversations:
             logger.warning(f"No conversation found for {profile_url}")
@@ -313,11 +251,11 @@ class LinkedInAutomation:
         try:
             logger.info(f"Checking response for: {profile_url}")
             self.driver.get(f"{LINKEDIN_URL}/messaging/")
-            human_delay(*DELAY_RANGE)
+            await asyncio.sleep(random.uniform(*DELAY_RANGE))
 
             conversations = self.driver.find_elements(By.CSS_SELECTOR, SELECTORS['conversation_list'])
 
-            for conv in conversations[:20]:  # Check first 20 conversations
+            for conv in conversations[:20]:
                 try:
                     unread_badges = conv.find_elements(By.CSS_SELECTOR, SELECTORS['unread_badge'])
                     if not unread_badges:
@@ -326,31 +264,31 @@ class LinkedInAutomation:
                     participant_element = conv.find_element(By.CSS_SELECTOR, SELECTORS['participant_name'])
                     participant_name = participant_element.text.strip()
 
-                    tracked_name = self.conversations[profile_url].get('user_name', '')
+                    tracked_name = self.conversations[profile_url].user_name
                     if participant_name.lower() != tracked_name.lower():
                         continue
 
-                    safe_click(self.driver, conv)
-                    human_delay(2, 3)
+                    await self._safe_click(conv)
+                    await asyncio.sleep(random.uniform(2, 3))
 
-                    voice_messages = self.driver.find_elements(By.CSS_SELECTOR, SELECTORS['voice_messages'])
+                    voice_messages = await self._find_voice_messages()
                     if voice_messages:
                         logger.info(f"Found {len(voice_messages)} voice message(s) from {participant_name}")
-                        downloaded = self.download_voice_messages(self.driver)
+                        downloaded = await self.download_voice_messages(self.driver)
                         if downloaded:
-                            self.conversations[profile_url]['voice_responses'] = downloaded
+                            self.conversations[profile_url].voice_responses = downloaded
 
                     messages = self.driver.find_elements(By.CSS_SELECTOR, SELECTORS['last_message'])
                     if messages:
                         last_message = messages[-1].text
 
-                        if last_message != self.conversations[profile_url]['message_sent']:
-                            self.conversations[profile_url]['has_response'] = True
+                        if last_message != self.conversations[profile_url].message_sent:
+                            self.conversations[profile_url].has_response = True
                             logger.info(f"Response received from {participant_name} ({profile_url})")
                             return True
 
                     if voice_messages:
-                        self.conversations[profile_url]['has_response'] = True
+                        self.conversations[profile_url].has_response = True
                         logger.info(f"Voice response received from {participant_name} ({profile_url})")
                         return True
 
@@ -364,122 +302,14 @@ class LinkedInAutomation:
             logger.error(f"Error checking response: {e}")
             return None
 
-    def run_response_checker(self, profile_urls: List[str], interval: int = CHECK_INTERVAL) -> None:
-        """Continuously check for responses"""
-        logger.info(f"Starting response checker with {interval}s interval")
-
-        while True:
-            try:
-                for profile_url in profile_urls:
-                    if profile_url in self.conversations and not self.conversations[profile_url]['has_response']:
-                        has_response = self.check_response(profile_url)
-                        if has_response:
-                            logger.info(f"New response from {profile_url}!")
-
-                        human_delay(30, 60)
-
-                logger.info(f"Waiting {interval} seconds before next check...")
-                time.sleep(interval)
-
-            except KeyboardInterrupt:
-                logger.info("Response checker stopped by user")
-                break
-            except Exception as e:
-                logger.error(f"Error in response checker: {e}")
-                time.sleep(60)  # Wait before retry
-
-    def send_voice_message(self, profile_url: str, voice_file_path: str = VOICE_MESSAGE_PATH) -> bool:
-        """Send voice message to a LinkedIn user"""
-        if not self.logged_in:
-            logger.error("Not logged in!")
-            return False
-
-        if not voice_file_path or not os.path.exists(voice_file_path):
-            logger.error(f"Voice file not found: {voice_file_path}")
-            return False
-
-        try:
-            logger.info(f"Navigating to profile: {profile_url}")
-            self.driver.get(profile_url)
-            human_delay(*DELAY_RANGE)
-
-            random_scroll(self.driver, random.randint(1, 2))
-
-            message_button = wait_for_element(self.driver, SELECTORS['message_button'], 15)
-            if not message_button:
-                logger.error("Message button not found")
-                return False
-
-            move_to_element_human(self.driver, message_button)
-            human_delay(1, 2)
-
-            if not safe_click(self.driver, message_button):
-                return False
-
-            human_delay(3, 5)
-
-            attachment_button = wait_for_element(self.driver, SELECTORS['attachment_button'], 15)
-            if not attachment_button:
-                logger.error("Attachment button not found")
-                return False
-
-            move_to_element_human(self.driver, attachment_button)
-            human_delay(1, 2)
-            safe_click(self.driver, attachment_button)
-            human_delay(2, 3)
-
-            file_inputs = self.driver.find_elements(By.CSS_SELECTOR, 'input[type="file"]')
-            if not file_inputs:
-                logger.error("File input not found")
-                return False
-
-            file_input = file_inputs[0]
-            file_input.send_keys(os.path.abspath(voice_file_path))
-            logger.info(f"Uploaded voice file: {voice_file_path}")
-            human_delay(3, 5)
-
-            send_button = wait_for_element(self.driver, SELECTORS['send_button'], 10)
-            if not send_button:
-                logger.error("Send button not found after file upload")
-                return False
-
-            move_to_element_human(self.driver, send_button)
-            human_delay(1, 2)
-
-            if safe_click(self.driver, send_button):
-                logger.info("Voice message sent successfully!")
-
-                try:
-                    name_element = self.driver.find_element(By.CSS_SELECTOR, SELECTORS['profile_name'])
-                    user_name = name_element.text.strip()
-                except:
-                    user_name = profile_url.split('/')[-2]
-
-                self.conversations[profile_url] = {
-                    'message_sent': '[Voice Message]',
-                    'timestamp': time.time(),
-                    'has_response': False,
-                    'user_name': user_name,
-                    'voice_sent': True
-                }
-
-                human_delay(2, 4)
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error sending voice message: {e}")
-            return False
-
-    def download_voice_messages(self, conversation_element) -> List[str]:
+    async def download_voice_messages(self, conversation_element) -> list[str]:
         """Download voice messages from a conversation"""
         downloaded_files = []
 
         try:
             os.makedirs(DOWNLOAD_PATH, exist_ok=True)
 
-            audio_elements = conversation_element.find_elements(By.CSS_SELECTOR, SELECTORS['voice_messages'])
+            audio_elements = await self._find_voice_messages()
 
             cookies = self.driver.get_cookies()
             session = requests.Session()
@@ -509,7 +339,7 @@ class LinkedInAutomation:
                         logger.info(f"Downloaded voice message: {filename}")
                         downloaded_files.append(filepath)
 
-                        time.sleep(random.uniform(1, 2))
+                        await asyncio.sleep(random.uniform(1, 2))
                     else:
                         logger.error(f"Failed to download voice message: {response.status_code}")
 
@@ -523,40 +353,259 @@ class LinkedInAutomation:
             logger.error(f"Error in download_voice_messages: {e}")
             return downloaded_files
 
-    def run_response_checker(self, profile_urls: List[str], interval: int = CHECK_INTERVAL) -> None:
+    async def run_response_checker(self, profile_urls: list[str], interval: int = CHECK_INTERVAL) -> None:
         """Continuously check for responses"""
         logger.info(f"Starting response checker with {interval}s interval")
 
         while True:
             try:
                 for profile_url in profile_urls:
-                    if profile_url in self.conversations and not self.conversations[profile_url]['has_response']:
-                        has_response = self.check_response(profile_url)
+                    if profile_url in self.conversations and not self.conversations[profile_url].has_response:
+                        has_response = await self.check_response(profile_url)
                         if has_response:
                             logger.info(f"New response from {profile_url}!")
 
-                            # Log voice messages if any
-                            voice_files = self.conversations[profile_url].get('voice_responses', [])
+                            voice_files = self.conversations[profile_url].voice_responses
                             if voice_files:
                                 logger.info(f"Downloaded {len(voice_files)} voice messages")
 
-                        human_delay(30, 60)
+                        await asyncio.sleep(random.uniform(30, 60))
 
                 logger.info(f"Waiting {interval} seconds before next check...")
-                time.sleep(interval)
+                await asyncio.sleep(interval)
 
             except KeyboardInterrupt:
                 logger.info("Response checker stopped by user")
                 break
             except Exception as e:
                 logger.error(f"Error in response checker: {e}")
-                time.sleep(60)
+                await asyncio.sleep(60)
 
-    def close(self) -> None:
-        """Close the browser"""
+    async def close(self) -> None:
+        """Close the browser and save session"""
         if self.driver:
             if self.logged_in and REUSE_SESSION:
-                logger.info("Save cookie")
-                self.save_cookies()
+                await self._save_cookies()
             self.driver.quit()
             logger.info("Browser closed")
+
+    # Private helper methods
+    async def _get_or_create_user_agent(self) -> str:
+        """Get or create user agent"""
+        if os.path.exists(self.user_agent_path):
+            with open(self.user_agent_path, 'r') as f:
+                return f.read().strip()
+        else:
+            user_agent = get_random_user_agent()
+            with open(self.user_agent_path, 'w') as f:
+                f.write(user_agent)
+            return user_agent
+
+    async def _check_proxy(self, proxy: str) -> bool:
+        """Check if proxy is working"""
+        return check_proxy(proxy)
+
+    async def _save_cookies(self) -> bool:
+        """Save browser cookies"""
+        try:
+            cookies = self.driver.get_cookies()
+            with open(self.cookies_path, 'w') as f:
+                json.dump(cookies, f, indent=2)
+            logger.info(f"Saved {len(cookies)} cookies")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving cookies: {e}")
+            return False
+
+    async def _load_cookies(self) -> bool:
+        """Load cookies from file"""
+        try:
+            if not os.path.exists(self.cookies_path):
+                return False
+
+            self.driver.get(LINKEDIN_URL)
+            await asyncio.sleep(random.uniform(2, 3))
+
+            with open(self.cookies_path, 'r') as f:
+                cookies = json.load(f)
+
+            for cookie in cookies:
+                if 'expiry' in cookie:
+                    del cookie['expiry']
+                try:
+                    self.driver.add_cookie(cookie)
+                except:
+                    pass
+
+            self.driver.refresh()
+            await asyncio.sleep(random.uniform(3, 5))
+            return True
+
+        except Exception as e:
+            logger.error(f"Error loading cookies: {e}")
+            return False
+
+    async def _is_logged_in(self) -> bool:
+        """Check if logged in"""
+        try:
+            current_url = self.driver.current_url
+            if any(path in current_url for path in ['feed', 'mynetwork', 'messaging', 'jobs']):
+                profile_elements = self.driver.find_elements(By.CSS_SELECTOR, SELECTORS['profile_photo'])
+                return bool(profile_elements)
+            return False
+        except:
+            return False
+
+    async def _perform_login(self) -> bool:
+        """Perform actual login"""
+        logger.info("Starting login process...")
+        self.driver.get(LOGIN_URL)
+        await asyncio.sleep(random.uniform(*DELAY_RANGE))
+
+        email_input = self.wait_for_element(SELECTORS['email_input'])
+        if not email_input:
+            raise Exception("Email input not found")
+
+        await self._human_typing(email_input, LINKEDIN_EMAIL)
+        await asyncio.sleep(random.uniform(1, 2))
+
+        password_input = self.wait_for_element(SELECTORS['password_input'])
+        if not password_input:
+            raise Exception("Password input not found")
+
+        await self._human_typing(password_input, LINKEDIN_PASSWORD)
+        await asyncio.sleep(random.uniform(1, 2))
+
+        login_button = self.wait_for_element(SELECTORS['login_button'])
+        if not login_button:
+            raise Exception("Login button not found")
+
+        await self._safe_click(login_button)
+        await asyncio.sleep(random.uniform(5, 8))
+
+        if await self._handle_verification():
+            await asyncio.sleep(random.uniform(3, 5))
+
+        if "feed" in self.driver.current_url or "mynetwork" in self.driver.current_url:
+            self.logged_in = True
+            logger.info("Login successful!")
+            await self._save_cookies()
+            await self._random_scroll()
+            return True
+
+        return False
+
+    async def _handle_verification(self) -> bool:
+        """Handle verification if required"""
+        if "checkpoint" not in self.driver.current_url and "challenge" not in self.driver.current_url:
+            return False
+
+        logger.info("Verification required!")
+        await asyncio.sleep(random.uniform(2, 3))
+
+        verification_input = self.wait_for_element(SELECTORS['verification_inputs'], timeout=5)
+        if not verification_input:
+            return False
+
+        code = await self._get_verification_code()
+        if not code:
+            return False
+
+        await self._human_typing(verification_input, code)
+        await asyncio.sleep(random.uniform(1, 2))
+
+        submit_button = self.wait_for_element(SELECTORS['verification_submit'], timeout=5)
+        if submit_button:
+            await self._safe_click(submit_button)
+        else:
+            verification_input.send_keys(Keys.RETURN)
+
+        logger.info("Verification code submitted")
+        await asyncio.sleep(random.uniform(3, 5))
+        return True
+
+    async def _get_verification_code(self) -> Optional[str]:
+        """Get verification code from user"""
+        logger.info("Manual verification required!")
+        print("Please enter the verification code sent to your email/phone:")
+
+        try:
+            code = await asyncio.get_event_loop().run_in_executor(None, input, "Enter verification code: ")
+            return code.strip() if code else None
+        except:
+            return None
+
+    async def _find_voice_messages(self) -> list:
+        """Find voice message elements"""
+        for selector in SELECTORS['voice_messages']:
+            elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+            if elements:
+                return elements
+        return []
+
+    async def _safe_click(self, element) -> bool:
+        """Safely click an element"""
+        try:
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+            await asyncio.sleep(random.uniform(0.5, 1))
+            element.click()
+            return True
+        except:
+            try:
+                self.driver.execute_script("arguments[0].click();", element)
+                return True
+            except Exception as e:
+                logger.error(f"Failed to click element: {e}")
+                return False
+
+    async def _human_typing(self, element, text: str) -> None:
+        """Type with human-like speed"""
+        element.clear()
+        for char in text:
+            element.send_keys(char)
+            await asyncio.sleep(random.uniform(*TYPING_DELAY))
+
+    async def _random_scroll(self, scrolls: int = None) -> None:
+        """Perform random scrolling"""
+        if scrolls is None:
+            scrolls = random.randint(1, 3)
+
+        for _ in range(scrolls):
+            scroll_height = random.randint(300, 700)
+            direction = random.choice([1, -1])
+            self.driver.execute_script(f"window.scrollBy(0, {scroll_height * direction})")
+            await asyncio.sleep(random.uniform(1, 2))
+
+    async def _extract_username(self, profile_url: str) -> str:
+        """Extract username from profile"""
+        try:
+            name_elem = self.driver.find_element(By.CSS_SELECTOR, SELECTORS['profile_name'])
+            return name_elem.text.strip()
+        except:
+            return profile_url.split('/')[-2]
+
+    async def _update_profile_data(self, profile_url: str, update_data: dict) -> bool:
+        """Update profile data in storage"""
+        try:
+            filepath = os.path.join(DATA_FOLDER, PROFILES_FILE)
+
+            profiles = {}
+            if os.path.exists(filepath):
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    profiles = json.load(f)
+                    if isinstance(profiles, list):
+                        profiles = {p['profile_url']: p for p in profiles}
+
+            if profile_url not in profiles:
+                profiles[profile_url] = {'profile_url': profile_url}
+
+            profiles[profile_url].update(update_data)
+
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(profiles, f, indent=2, ensure_ascii=False)
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error updating profile data: {e}")
+            return False
