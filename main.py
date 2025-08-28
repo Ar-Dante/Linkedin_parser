@@ -18,7 +18,6 @@ async def main():
 
     automation = LinkedInAutomation(use_proxy=True)
 
-
     try:
         await automation.setup_driver()
         search_engine = LinkedInSearchEngine(automation)
@@ -73,12 +72,6 @@ async def main():
             logger.info("Message sent successfully")
         else:
             logger.error("Failed to send message")
-
-        # Send voice message example
-        # success = await automation.send_voice_message(
-        #     "https://www.linkedin.com/in/artem-danilov-871847283/",
-        #     "./voice_message.mp3"
-        # )
 
         profile_urls = ["https://www.linkedin.com/in/artem-danilov-871847283/"]
         await automation.run_response_checker(profile_urls)

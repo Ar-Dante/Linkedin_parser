@@ -41,11 +41,6 @@ class BaseAutomation(ABC):
         pass
 
     @abstractmethod
-    async def send_voice_message(self, recipient_url: str, voice_file_path: str) -> bool:
-        """Send voice message"""
-        pass
-
-    @abstractmethod
     async def check_response(self, recipient_url: str) -> bool | None:
         """Check for responses"""
         pass

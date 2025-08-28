@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-from abc import ABC
 from typing import Optional, Union
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webelement import WebElement
@@ -16,7 +15,8 @@ logger = logging.getLogger(__name__)
 class LinkedInParser(BaseParser):
     """Parser for LinkedIn data extraction"""
 
-    def _parse_profile_name(self, element: WebElement) -> str:
+    @staticmethod
+    def _parse_profile_name(element: WebElement) -> str:
         """Extract profile name"""
         try:
             name_elem = element.find_element(By.CSS_SELECTOR, 'span[dir="ltr"] span[aria-hidden="true"]')
@@ -43,7 +43,8 @@ class LinkedInParser(BaseParser):
         url = profile_link_elem.get_attribute('href')
         return self._clean_url(url)
 
-    def _parse_profile_location(self, element: WebElement) -> str:
+    @staticmethod
+    def _parse_profile_location(element: WebElement) -> str:
         """Extract profile location"""
         try:
             location_elems = element.find_elements(By.CSS_SELECTOR, 'div.t-14.t-normal')
@@ -51,7 +52,8 @@ class LinkedInParser(BaseParser):
         except:
             return ""
 
-    def _parse_company_id(self, element: WebElement) -> str:
+    @staticmethod
+    def _parse_company_id(element: WebElement) -> str:
         """Extract company ID from URN attribute"""
         urn_attr = element.get_attribute('data-chameleon-result-urn')
         if not urn_attr:
@@ -94,7 +96,8 @@ class LinkedInParser(BaseParser):
             location_text = ""
         return industry, location_text
 
-    def _parse_job_id(self, card: WebElement, job_url: str) -> str:
+    @staticmethod
+    def _parse_job_id(card: WebElement, job_url: str) -> str:
         """Extract job ID"""
         job_id = card.get_attribute('data-occludable-job-id')
         if not job_id and '/view/' in job_url:
@@ -103,7 +106,8 @@ class LinkedInParser(BaseParser):
             job_id = job_url.split('/')[-1].split('?')[0]
         return job_id
 
-    def _parse_job_title(self, job_link_elem: WebElement) -> str:
+    @staticmethod
+    def _parse_job_title(job_link_elem: WebElement) -> str:
         """Extract job title"""
         try:
             job_title_elem = job_link_elem.find_element(By.CSS_SELECTOR, SELECTORS['job_title'])
@@ -111,7 +115,8 @@ class LinkedInParser(BaseParser):
         except:
             return job_link_elem.get_attribute('aria-label').replace(' with verification', '').strip()
 
-    def _parse_job_posted_time(self, card: WebElement) -> tuple[str, str]:
+    @staticmethod
+    def _parse_job_posted_time(card: WebElement) -> tuple[str, str]:
         """Extract job posted time and datetime"""
         try:
             time_elem = card.find_element(By.CSS_SELECTOR, SELECTORS['job_time'])
@@ -121,7 +126,8 @@ class LinkedInParser(BaseParser):
         except:
             return "", ""
 
-    def _parse_job_flags(self, card: WebElement) -> tuple[bool, bool]:
+    @staticmethod
+    def _parse_job_flags(card: WebElement) -> tuple[bool, bool]:
         """Extract job flags (promoted, easy apply)"""
         try:
             promoted_elem = card.find_element(By.CSS_SELECTOR, SELECTORS['job_promoted'])
@@ -210,7 +216,8 @@ class LinkedInParser(BaseParser):
             logger.debug(f"Error parsing job from search: {e}")
             return None
 
-    def save_to_json(self, data: Union[
+    @staticmethod
+    def save_to_json(data: Union[
         ProfileData, CompanyData, JobData,
         list[ProfileData], list[CompanyData], list[JobData]
     ]):
